@@ -123,3 +123,23 @@ test('budget: renewal alert N days before the credits expire', () => {
   const plain = computeBudgetMeter(credits(300, new Date(NOW - 80 * D).toISOString(), new Date(NOW + 3 * D).toISOString()), NOW, opts);
   assert.equal(plain.alert, null);
 });
+
+test('zero usage after the period started is below pace, with the dot visibly below the line', () => {
+  // Weekly limit that reset ~15 minutes ago.
+  const justReset = computeWindowMeter(week(0, 7 * D - 15 * 60_000), NOW, opts);
+  assert.equal(justReset.status, 'under');
+  assert.ok(justReset.gauge! <= -0.15, `gauge ${justReset.gauge}`);
+  // A little usage at the very start is still on pace (inside the tolerance).
+  assert.equal(computeWindowMeter(week(1, 7 * D - 3 * H), NOW, opts).status, 'on_pace');
+  // Same rule for credits: nothing spent yet = room to spare.
+  const fresh = computeBudgetMeter(credits(0, new Date(NOW - H).toISOString(), new Date(NOW + 90 * D).toISOString()), NOW, opts);
+  assert.equal(fresh.status, 'under');
+  assert.equal(classify(0, 0, 5), 'on_pace', 'at the exact start nothing is behind yet');
+});
+
+test('gauge always agrees with the status label', () => {
+  assert.equal(gaugeFor(-1, 'under'), -0.15);
+  assert.equal(gaugeFor(2, 'over'), 0.15);
+  assert.equal(gaugeFor(-40, 'under'), gaugeFor(-40));
+  assert.equal(gaugeFor(-2, 'on_pace'), gaugeFor(-2));
+});

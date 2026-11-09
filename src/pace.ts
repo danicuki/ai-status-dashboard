@@ -6,6 +6,8 @@ const DAY_MS = 86_400_000;
 const MIN_ELAPSED_FOR_PROJECTION = 5;
 /** A delta of this many percentage points maps to gauge ≈ ±0.76 (tanh(1)). */
 const GAUGE_SCALE = 25;
+/** A dot labelled above/below pace must sit visibly off the middle line. */
+const MIN_OFF_PACE_GAUGE = 0.15;
 
 export interface PaceOptions {
   /** Deviation (in percentage points) still considered "on pace". */
@@ -18,15 +20,23 @@ export interface PaceOptions {
  */
 export function classify(usedPct: number, elapsedPct: number, tolerancePct: number): PaceStatus {
   if (usedPct >= 100) return 'limit';
+  // Nothing used once the period has started is room to spare, not "on pace" (e.g. right after a reset).
+  if (usedPct <= 0 && elapsedPct > 0) return 'under';
   const delta = usedPct - elapsedPct;
   if (delta > tolerancePct) return 'over';
   if (delta < -tolerancePct) return 'under';
   return 'on_pace';
 }
 
-/** Soft clamp so small deviations are visible and large ones never fall off the gauge. */
-export function gaugeFor(deltaPct: number): number {
-  return round(Math.tanh(deltaPct / GAUGE_SCALE), 3);
+/**
+ * Soft clamp so small deviations are visible and large ones never fall off the gauge.
+ * With a status, the dot is kept on the side the status names (never on the line while labelled "below").
+ */
+export function gaugeFor(deltaPct: number, status?: PaceStatus): number {
+  let g = Math.tanh(deltaPct / GAUGE_SCALE);
+  if (status === 'under') g = Math.min(g, -MIN_OFF_PACE_GAUGE);
+  if (status === 'over') g = Math.max(g, MIN_OFF_PACE_GAUGE);
+  return round(g, 3);
 }
 
 export function computeMeter(r: Reading, now: number, opts: PaceOptions): Meter {
@@ -74,7 +84,7 @@ export function computeWindowMeter(r: WindowReading, now: number, opts: PaceOpti
     usedPct: round(used, 1),
     elapsedPct: round(elapsedPct, 1),
     deltaPct: round(deltaPct, 1),
-    gauge: gaugeFor(deltaPct),
+    gauge: gaugeFor(deltaPct, status),
     projectedPct: projectedPct == null ? null : round(projectedPct, 0),
     startsAt: new Date(start).toISOString(),
     resetsAt: new Date(end).toISOString(),
@@ -152,7 +162,7 @@ export function computeBudgetMeter(r: BudgetReading, now: number, opts: PaceOpti
     usedPct: round(usedPct, 1),
     elapsedPct: round(elapsedPct, 1),
     deltaPct: round(deltaPct, 1),
-    gauge: gaugeFor(deltaPct),
+    gauge: gaugeFor(deltaPct, status),
     projectedPct: projectedPct == null ? null : round(projectedPct, 0),
     startsAt: new Date(start).toISOString(),
     resetsAt: new Date(end).toISOString(),
