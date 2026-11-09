@@ -1,0 +1,24 @@
+{
+  "name": "ai-pace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Indicador de ritmo de consumo de Claude, OpenAI (Codex) e Gemini (cr\u00e9ditos GCP) com backend \u00fanico e v\u00e1rios front-ends (web, iPhone, Mac, Waybar, LED).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.ts",
+    "dev": "node --env-file-if-exists=.env --watch src/server.ts",
+    "check": "node --env-file-if-exists=.env src/cli.ts check",
+    "push": "node --env-file-if-exists=.env src/cli.ts push",
+    "test": "node --test --test-reporter=spec 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit -p .",
+    "token": "node --env-file-if-exists=.env src/cli.ts token",
+    "demo": "node src/demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

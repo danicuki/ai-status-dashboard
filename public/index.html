@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>AI Pace</title>
+    <meta name="description" content="Are you using Claude, OpenAI and Gemini faster than your plan allows?" />
+    <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="AI Pace" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1>AI Pace</h1>
+        <p class="sub" id="updated">loading…</p>
+      </div>
+      <button id="refresh" class="icon-btn" type="button" aria-label="Fetch data now" title="Fetch data now">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </header>
+
+    <main>
+      <section class="card hero" id="hero" aria-labelledby="hero-title">
+        <h2 id="hero-title" class="visually-hidden">Usage pace</h2>
+        <div class="plot" id="plot"></div>
+        <p class="legend">
+          <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" class="legend-dot" /></svg> week / credits</span>
+          <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" class="legend-ring" /></svg> 5-hour session</span>
+          <span>middle line = ideal pace</span>
+        </p>
+      </section>
+
+      <div id="cards" class="cards"></div>
+
+      <section class="card login" id="login" hidden>
+        <h2>Access token</h2>
+        <p>Paste the API token (run <code>npm run token</code> on the server).</p>
+        <form id="login-form">
+          <input id="token-input" type="password" autocomplete="off" placeholder="token" required />
+          <button type="submit">Sign in</button>
+        </form>
+      </section>
+
+      <p class="error-banner" id="error" role="alert" hidden></p>
+    </main>
+
+    <footer class="foot" id="foot"></footer>
+    <div class="tip" id="tip" role="tooltip" hidden></div>
+    <noscript><p class="error-banner">Enable JavaScript to see the dashboard.</p></noscript>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

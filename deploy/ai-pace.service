@@ -1,0 +1,23 @@
+# systemd user service (Linux / Raspberry Pi without Docker).
+#   mkdir -p ~/.config/systemd/user && cp deploy/ai-pace.service ~/.config/systemd/user/
+#   Edit WorkingDirectory (where you cloned the repo) and ExecStart (the output of `command -v node`).
+#   systemctl --user daemon-reload && systemctl --user enable --now ai-pace
+#   loginctl enable-linger "$USER"   # keep running without an open session
+#   journalctl --user -u ai-pace -f  # logs
+[Unit]
+Description=AI Pace (AI usage pace indicator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/ai-status-dashboard
+ExecStart=/usr/bin/node --env-file-if-exists=.env src/server.ts
+Environment=NODE_NO_WARNINGS=1
+Restart=on-failure
+RestartSec=10
+# Hardening: the server only needs its own folder and the login files it reads/refreshes.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

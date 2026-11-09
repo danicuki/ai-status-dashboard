@@ -1,0 +1,28 @@
+# docker compose up -d --build
+#
+# Meant for DEDICATED logins (the server refreshes the tokens itself, 24/7).
+# Create them once on the host:
+#   CLAUDE_CONFIG_DIR=~/.config/ai-pace/claude claude auth login
+#   CODEX_HOME=~/.config/ai-pace/codex codex login
+# and, for Gemini via BigQuery, save the key as ~/.config/ai-pace/gcp-sa.json
+services:
+  ai-pace:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /data
+      CLAUDE_TOKEN_MODE: dedicated
+      CLAUDE_CREDENTIALS_FILE: /secrets/claude/.credentials.json
+      CODEX_TOKEN_MODE: dedicated
+      CODEX_AUTH_FILE: /secrets/codex/auth.json
+      # GCP_SERVICE_ACCOUNT_FILE: /secrets/gcp-sa.json
+      # TZ: Europe/Berlin   # your time zone, for dates shown in the UI
+    volumes:
+      - ./data:/data
+      # Writable: the server saves refreshed tokens here.
+      - ~/.config/ai-pace:/secrets
