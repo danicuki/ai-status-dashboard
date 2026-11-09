@@ -15,7 +15,8 @@
     "test": "node --test --test-reporter=spec 'test/**/*.test.ts'",
     "typecheck": "tsc --noEmit -p .",
     "token": "node --env-file-if-exists=.env src/cli.ts token",
-    "demo": "node src/demo.ts"
+    "demo": "node src/demo.ts",
+    "setup:gcp": "bash scripts/setup-gcp-budget.sh"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

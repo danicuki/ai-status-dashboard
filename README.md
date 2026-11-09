@@ -62,7 +62,7 @@ That's also why it works on the monochrome iPhone Lock Screen.
 |---|---|---|
 | **Claude** (Pro/Max) | 5-hour session, week, per-model weekly limits, extra usage | the same endpoint Claude Code's `/usage` reads, with your Claude Code OAuth login |
 | **OpenAI** (ChatGPT plan with Codex) | 5-hour session, week, credits | the same endpoint the Codex CLI's `/status` reads, with your Codex login |
-| **Gemini / Google Cloud credits** | credits spent vs. the credit period, expiry and renewal alert | BigQuery billing export, or a value you enter (see below) |
+| **Gemini / Google Cloud credits** | credits spent vs. the credit period, expiry and renewal alert | Cloud Billing budget notifications (Pub/Sub), the BigQuery billing export, or a value you enter |
 
 Claude usage is shared between claude.ai, the mobile apps and Claude Code, so the server sees all of it.
 
@@ -152,26 +152,33 @@ GEMINI_RENEW_DAYS=15              # ⚠ alert this many days before expiry
 ```
 
 Google Cloud has **no public API that returns spend or remaining credits** (the Cloud Billing API only covers
-accounts and the price catalog), so the amount spent comes from one of:
+accounts and the price catalog). AI Pace offers three ways to get the amount spent:
 
-- **Manual:** type the amount used in the Gemini card on the dashboard now and then (or `GEMINI_CREDIT_USED`).
-  Pace keeps being computed continuously in between.
-- **BigQuery billing export (automatic):**
+**1. Budget notifications via Pub/Sub (recommended, automatic).** The only official near-real-time signal:
+Cloud Billing publishes a budget's current spend several times a day. Run the setup script once on any machine
+where `gcloud` is logged in as a billing admin (read it first; it shows the plan and asks before changing anything):
+
+```bash
+npm run setup:gcp          # or: bash scripts/setup-gcp-budget.sh
+```
+
+It creates two notification-only budgets on the **billing account** (all projects, no thresholds, no emails),
+"AI Pace (gross)" and "AI Pace (net)", whose difference is exactly the promotional credits consumed; a Pub/Sub
+topic + subscription in a host project of your choice (only where those resources live); and a service account
+that can **only** read that subscription. It prints the `.env` lines for the server and the key to copy there.
+Run it again when you get a new credit. Google sends the first update within a few hours.
+
+**2. BigQuery billing export (automatic, more setup).**
   1. Billing → **Billing export → BigQuery** → enable "Standard usage cost" into a dataset. The table
      `gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX` appears after a few hours. This step is console-only.
   2. Create a service account with **BigQuery Data Viewer** (on the dataset) and **BigQuery Job User** (on the
      project), and download a JSON key.
-  3. Configure:
+  3. Configure `GCP_BILLING_TABLE`, `GCP_SERVICE_ACCOUNT_FILE` and optionally `GCP_BILLING_PROJECTS`.
 
-     ```ini
-     GCP_BILLING_TABLE=my-project.billing_export.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX
-     GCP_SERVICE_ACCOUNT_FILE=~/.config/ai-pace/gcp-sa.json
-     GCP_BILLING_PROJECTS=my-gemini-project   # optional filter
-     ```
+  It sums the promotional credits (`PROMOTION`) consumed in the period (`GCP_CREDIT_MEASURE=cost` sums the
+  gross cost instead). The export is not retroactive; put earlier spending in `GEMINI_CREDIT_USED_OFFSET`.
 
-  AI Pace sums the promotional credits (`PROMOTION`) consumed in the period; `GCP_CREDIT_MEASURE=cost` sums the
-  gross cost instead. The export is not retroactive and lags a few hours; put earlier spending in
-  `GEMINI_CREDIT_USED_OFFSET`. Queries stay well inside BigQuery's free tier.
+**3. Manual.** Type the amount used in the Gemini card on the dashboard now and then (or `GEMINI_CREDIT_USED`).
 
 ## Reaching it from your phone
 
@@ -273,14 +280,13 @@ text uses `LOCALE` (default `en-US`) for numbers, money and dates; the dashboard
 - The Claude and Codex usage endpoints are the ones their official CLIs use, but they are **not documented
   public APIs** and may change. The parsers accept every shape seen so far (including Claude's newer `limits[]`)
   and show a clear error on the card if something changes.
-- Google Cloud credits: no public API exposes them, hence the manual/BigQuery options.
+- Google Cloud credits: no public API exposes them, hence budget notifications, BigQuery or manual entry.
+  Budget data lags Google's own billing by a few hours, like the console.
 - iOS does not allow web pages to install widgets, and no app can place a widget for you: adding the widget
   is always a manual long-press → "+" step.
 
 ## Roadmap
 
-- **Automatic Google Cloud spend without BigQuery** via budget notifications (Pub/Sub), the only official
-  near-real-time signal Google offers.
 - **LED display:** `/api/v1/compact` already has what a Ulanzi TC001 (AWTRIX 3), a Raspberry Pi with a HUB75
   matrix or an ESP32 with a WS2812 strip needs.
 

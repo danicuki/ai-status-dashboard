@@ -29,7 +29,13 @@ export async function createApp(config: AppConfig): Promise<App> {
   const providers: Provider[] = [
     createClaudeProvider(config.claude),
     createOpenAIProvider(config.openai),
-    createGeminiProvider(config.gemini, () => store.state.manual.gemini),
+    createGeminiProvider(config.gemini, {
+      getManual: () => store.state.manual.gemini,
+      getBudgets: () => store.state.budgets ?? {},
+      setBudget: (n) => {
+        (store.state.budgets ??= {})[n.name] = n;
+      },
+    }),
   ];
 
   let apiToken = config.apiToken;

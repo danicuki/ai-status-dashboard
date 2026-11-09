@@ -329,6 +329,7 @@ function sourceLabel(source) {
     'claude-oauth': 'source: Claude (OAuth)',
     'codex-oauth': 'source: Codex (OAuth)',
     'gcp-bigquery': 'source: BigQuery billing export',
+    'gcp-budget': 'source: Cloud Billing budget updates',
     manual: 'source: entered manually',
   };
   if (source.startsWith('push:')) return `${map[source.slice(5)] ?? source.slice(5)} via push`;

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { CLAUDE_DEFAULTS, type ClaudeConfig } from './providers/claude.ts';
 import { CODEX_DEFAULTS, type OpenAIConfig } from './providers/openai.ts';
 import type { BigQueryConfig, GeminiConfig } from './providers/gemini.ts';
+import type { PubSubConfig } from './providers/gcp-budgets.ts';
 import { parseServiceAccount, type ServiceAccount } from './lib/google.ts';
 import type { TokenMode } from './providers/provider.ts';
 import pkg from '../package.json' with { type: 'json' };
@@ -117,19 +118,46 @@ function loadGemini(
     }
   }
 
-  let bigquery: BigQueryConfig | null = null;
-  const table = get('GCP_BILLING_TABLE');
-  if (table) {
-    let sa: ServiceAccount | null = null;
+  // Service account key, shared by the BigQuery and Pub/Sub sources.
+  let saCache: ServiceAccount | null | undefined;
+  const serviceAccount = (needs: string): ServiceAccount | null => {
+    if (saCache !== undefined) return saCache;
+    saCache = null;
     try {
       const file = get('GCP_SERVICE_ACCOUNT_FILE');
       const inline = get('GCP_SERVICE_ACCOUNT_JSON');
-      if (file) sa = parseServiceAccount(readFileSync(expandHome(file), 'utf8'));
-      else if (inline) sa = parseServiceAccount(inline);
-      else errors.push('GCP_BILLING_TABLE requires GCP_SERVICE_ACCOUNT_FILE or GCP_SERVICE_ACCOUNT_JSON');
+      if (file) saCache = parseServiceAccount(readFileSync(expandHome(file), 'utf8'));
+      else if (inline) saCache = parseServiceAccount(inline);
+      else errors.push(`${needs} requires GCP_SERVICE_ACCOUNT_FILE or GCP_SERVICE_ACCOUNT_JSON`);
     } catch (e) {
       errors.push(`invalid service account key: ${(e as Error).message}`);
     }
+    return saCache;
+  };
+
+  let pubsub: PubSubConfig | null = null;
+  const subscription = get('GCP_PUBSUB_SUBSCRIPTION');
+  if (subscription) {
+    const sa = serviceAccount('GCP_PUBSUB_SUBSCRIPTION');
+    if (sa) {
+      const since = get('GCP_BUDGET_SINCE') ?? null;
+      if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) errors.push('GCP_BUDGET_SINCE must be a date (YYYY-MM-DD)');
+      pubsub = {
+        subscription,
+        serviceAccount: sa,
+        apiBase: (get('PUBSUB_API_BASE') ?? 'https://pubsub.googleapis.com/v1').replace(/\/+$/, ''),
+        tokenUrl: get('GCP_TOKEN_URL') ?? null,
+        grossBudget: get('GCP_BUDGET_GROSS') ?? 'AI Pace (gross)',
+        netBudget: get('GCP_BUDGET_NET') ?? 'AI Pace (net)',
+        since,
+      };
+    }
+  }
+
+  let bigquery: BigQueryConfig | null = null;
+  const table = get('GCP_BILLING_TABLE');
+  if (table && !pubsub) {
+    const sa = serviceAccount('GCP_BILLING_TABLE');
     if (sa) {
       const jobProject = get('GCP_JOB_PROJECT') ?? sa.project_id ?? table.split('.')[0];
       const measure = (get('GCP_CREDIT_MEASURE') ?? 'credits').toLowerCase();
@@ -159,6 +187,7 @@ function loadGemini(
     offset: numOr('GEMINI_CREDIT_USED_OFFSET', 0),
     initialUsed: usedRaw === undefined ? null : numOr('GEMINI_CREDIT_USED', 0),
     bigquery,
+    pubsub,
     configError: errors.length ? `Incomplete Gemini configuration: ${errors.join('; ')}.` : null,
   };
 }

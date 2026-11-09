@@ -37,6 +37,8 @@ async function body(req: IncomingMessage): Promise<string> {
 
 let upstream: Server;
 let upstreamUrl = '';
+let pubsubQueue: unknown[] = [];
+const acked: string[] = [];
 
 before(async () => {
   upstream = createServer(async (req, res) => {
@@ -86,6 +88,16 @@ before(async () => {
       assert.equal(q.parameterMode, 'NAMED');
       assert.match(q.query, /FROM `proj\.billing\.gcp_billing_export_v1_X`/);
       return json(200, { jobComplete: true, rows: [{ f: [{ v: '330.5' }, { v: '-320.25' }, { v: '2026-11-09T10:00:00Z' }, { v: 'USD' }] }] });
+    }
+    if (req.url === '/pubsub/projects/host-proj/subscriptions/ai-pace-budget:pull') {
+      assert.equal(auth, 'Bearer gcp-token');
+      const items = pubsubQueue;
+      pubsubQueue = [];
+      return json(200, items.length ? { receivedMessages: items } : {});
+    }
+    if (req.url === '/pubsub/projects/host-proj/subscriptions/ai-pace-budget:acknowledge') {
+      acked.push(...JSON.parse(b).ackIds);
+      return json(200, {});
     }
     json(404, { error: 'nope' });
   });
@@ -280,6 +292,71 @@ test('push ingestion and manual credits', async () => {
     const again = await createApp(app.config);
     assert.equal(again.store.state.manual.gemini?.used, 200);
     assert.equal(again.store.state.snapshots.claude?.plan, 'Pro');
+  } finally {
+    close();
+  }
+});
+
+test('Google Cloud credits via Cloud Billing budget notifications (Pub/Sub)', async () => {
+  const saFile = path.join(dir, 'sa-pubsub.json');
+  writeFileSync(
+    saFile,
+    JSON.stringify({
+      client_email: 'sa@proj.iam.gserviceaccount.com',
+      private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+      token_uri: `${upstreamUrl}/google/token`,
+    }),
+  );
+  const notice = (name: string, cost: number, publishTime: string, intervalStart = '2026-11-09T08:00:00Z') => ({
+    ackId: `ack-${name}-${cost}`,
+    message: {
+      data: Buffer.from(JSON.stringify({ budgetDisplayName: name, costAmount: cost, costIntervalStart: intervalStart, budgetAmount: 3000, currencyCode: 'EUR' })).toString('base64'),
+      publishTime,
+    },
+  });
+  const { app, close } = await startApp({
+    DATA_DIR: path.join(dir, 'data4'),
+    API_TOKEN: 't',
+    CLAUDE_ENABLED: 'false',
+    OPENAI_ENABLED: 'false',
+    GEMINI_CREDIT_TOTAL: '3000',
+    GEMINI_CREDIT_CURRENCY: 'EUR',
+    GEMINI_CREDIT_START: new Date(now - 68 * 24 * H).toISOString(),
+    GEMINI_CREDIT_END: new Date(now + 22 * 24 * H).toISOString(),
+    GEMINI_CREDIT_USED_OFFSET: '600.25',
+    GCP_PUBSUB_SUBSCRIPTION: 'projects/host-proj/subscriptions/ai-pace-budget',
+    GCP_SERVICE_ACCOUNT_FILE: saFile,
+    GCP_BUDGET_SINCE: '2026-11-09',
+    PUBSUB_API_BASE: `${upstreamUrl}/pubsub`,
+  });
+  const gemini = () => app.status().providers.find((p) => p.id === 'gemini')!;
+  try {
+    // Before Google's first notification: the baseline, with a clear note.
+    await app.collector.refreshAll();
+    assert.equal(gemini().error, null);
+    assert.equal(gemini().primary?.used, 600.25);
+    assert.match(gemini().extras.map((x) => x.value).join(' '), /waiting for Google's first budget update/);
+    assert.equal(gemini().acceptsManual, false);
+
+    pubsubQueue = [
+      notice('AI Pace (gross)', 100, '2026-11-09T10:00:00Z'),
+      notice('AI Pace (gross)', 300, '2026-11-09T16:00:00Z'),
+      notice('AI Pace (net)', 20, '2026-11-09T16:00:00Z'),
+      notice('AI Pace (gross)', 9999, '2026-11-10T00:00:00Z', '2026-08-01T07:00:00Z'), // previous credit's period
+      { ackId: 'junk', message: { data: Buffer.from('not json').toString('base64') } },
+    ];
+    await app.collector.refreshAll();
+    const g = gemini();
+    assert.equal(g.source, 'gcp-budget');
+    assert.equal(g.primary?.used, 880.25, 'baseline + (gross − net) from the newest current notices');
+    assert.equal(g.primary?.dataAsOf, '2026-11-09T16:00:00Z');
+    assert.deepEqual([...acked].sort(), ['ack-AI Pace (gross)-100', 'ack-AI Pace (gross)-300', 'ack-AI Pace (gross)-9999', 'ack-AI Pace (net)-20', 'junk'].sort());
+
+    // No new messages: keep the last known values (they were acknowledged, so they live in the state).
+    await app.collector.refreshAll();
+    assert.equal(gemini().primary?.used, 880.25);
+    const again = await createApp(app.config);
+    assert.equal(again.store.state.budgets?.['AI Pace (gross)']?.cost, 300);
   } finally {
     close();
   }

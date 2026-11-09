@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { ProviderId, ProviderSnapshot } from './types.ts';
+import type { BudgetNotice } from './providers/gcp-budgets.ts';
 import { readJsonFile, writeJsonFileAtomic } from './lib/json.ts';
 import { log } from './lib/log.ts';
 
@@ -16,6 +17,8 @@ export interface State {
   snapshots: Partial<Record<ProviderId, ProviderSnapshot>>;
   errors: Partial<Record<ProviderId, StoredError>>;
   manual: Partial<Record<ProviderId, { used: number; updatedAt: string; key?: string }>>;
+  /** Latest Cloud Billing budget notifications (Pub/Sub messages are acknowledged, so they live here). */
+  budgets?: Record<string, BudgetNotice>;
 }
 
 const emptyState = (): State => ({ version: 1, snapshots: {}, errors: {}, manual: {} });

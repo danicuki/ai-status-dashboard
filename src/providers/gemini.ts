@@ -5,6 +5,7 @@ import { fetchJson } from '../lib/http.ts';
 import { isObj, num, obj, str } from '../lib/json.ts';
 import { fmtMoney } from '../format.ts';
 import { PROVIDER_META, type Provider } from './provider.ts';
+import { isCurrent, pullBudgetNotices, type BudgetNotice, type PubSubConfig } from './gcp-budgets.ts';
 
 export interface BigQueryConfig {
   /** Fully qualified billing export table: project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX */
@@ -37,7 +38,16 @@ export interface GeminiConfig {
   /** Manual mode starting value (GEMINI_CREDIT_USED); the dashboard can update it later. */
   initialUsed: number | null;
   bigquery: BigQueryConfig | null;
+  /** Budget notifications via Pub/Sub (preferred automatic source; see scripts/setup-gcp-budget.sh). */
+  pubsub: PubSubConfig | null;
   configError: string | null;
+}
+
+/** What the Gemini provider keeps in the server's state between refreshes. */
+export interface GeminiState {
+  getManual(): ManualValue | undefined;
+  getBudgets(): Record<string, BudgetNotice>;
+  setBudget(notice: BudgetNotice): void;
 }
 
 export interface ManualValue {
@@ -53,8 +63,9 @@ export function creditKey(cfg: Pick<GeminiConfig, 'periodStart' | 'periodEnd' | 
 
 const BQ_SCOPE = 'https://www.googleapis.com/auth/bigquery';
 const AUTH_HINT = 'The service account needs the "BigQuery Data Viewer" (on the export dataset) and "BigQuery Job User" (on the project) roles.';
+const PUBSUB_HINT = 'The service account needs the "Pub/Sub Subscriber" role on the subscription (scripts/setup-gcp-budget.sh grants it).';
 
-export function createGeminiProvider(cfg: GeminiConfig, getManual: () => ManualValue | undefined): Provider {
+export function createGeminiProvider(cfg: GeminiConfig, state: GeminiState): Provider {
   const meta = PROVIDER_META.gemini;
 
   return {
@@ -62,11 +73,13 @@ export function createGeminiProvider(cfg: GeminiConfig, getManual: () => ManualV
     name: meta.name,
     short: meta.short,
     enabled: cfg.enabled,
-    acceptsManual: !cfg.bigquery,
+    acceptsManual: !cfg.bigquery && !cfg.pubsub,
     describe: () =>
-      cfg.bigquery
-        ? `GCP credits via the BigQuery billing export · ${cfg.bigquery.table}`
-        : 'GCP credits in manual mode (update the amount used from the dashboard)',
+      cfg.pubsub
+        ? `GCP credits via Cloud Billing budget notifications (Pub/Sub) · ${cfg.pubsub.subscription}`
+        : cfg.bigquery
+          ? `GCP credits via the BigQuery billing export · ${cfg.bigquery.table}`
+          : 'GCP credits in manual mode (update the amount used from the dashboard)',
     async fetch(): Promise<ProviderSnapshot> {
       if (cfg.configError) throw new ProviderError(cfg.configError, 'not_configured');
       const extras: Extra[] = [];
@@ -74,7 +87,37 @@ export function createGeminiProvider(cfg: GeminiConfig, getManual: () => ManualV
       let dataAsOf: string | null = null;
       let source: string;
 
-      if (cfg.bigquery) {
+      if (cfg.pubsub) {
+        const ps = cfg.pubsub;
+        let fresh: Map<string, BudgetNotice>;
+        try {
+          fresh = await pullBudgetNotices(ps);
+        } catch (e) {
+          throw toProviderError(e, meta.name, PUBSUB_HINT);
+        }
+        for (const n of fresh.values()) {
+          const prev = state.getBudgets()[n.name];
+          if (!prev || prev.publishedAt <= n.publishedAt) state.setBudget(n);
+        }
+        const known = state.getBudgets();
+        const pick = (name: string) => (known[name] && isCurrent(known[name], ps.since) ? known[name] : undefined);
+        const gross = pick(ps.grossBudget);
+        const net = pick(ps.netBudget);
+        source = 'gcp-budget';
+        if (!gross) {
+          used = cfg.offset;
+          extras.push({ id: 'waiting', label: 'Status', value: "waiting for Google's first budget update (can take a few hours)", tone: 'warn' });
+        } else {
+          // Promotional credits consumed since the budgets started = gross cost − cost after promotions.
+          used = cfg.offset + (net ? Math.max(0, gross.cost - net.cost) : gross.cost);
+          dataAsOf = [gross.publishedAt, net?.publishedAt].filter((t): t is string => !!t).sort()[0] ?? null;
+          if (!net) extras.push({ id: 'net', label: 'Note', value: 'net budget not reported yet: counting the gross cost', tone: 'warn' });
+          if (gross.currency && gross.currency !== cfg.currency) {
+            extras.push({ id: 'currency', label: 'Warning', value: `billing is in ${gross.currency} but the total is configured in ${cfg.currency}`, tone: 'warn' });
+          }
+          extras.push({ id: 'gross', label: 'Total cost since setup', value: fmtMoney(gross.cost, gross.currency ?? cfg.currency), tone: 'neutral' });
+        }
+      } else if (cfg.bigquery) {
         let r: BillingTotals;
         try {
           r = await queryBillingExport(cfg.bigquery, cfg.periodStart, cfg.periodEnd);
@@ -91,7 +134,7 @@ export function createGeminiProvider(cfg: GeminiConfig, getManual: () => ManualV
           extras.push({ id: 'gross', label: 'Gross cost in period', value: fmtMoney(r.grossCost + cfg.offset, cfg.currency), tone: 'neutral' });
         }
       } else {
-        const stored = getManual();
+        const stored = state.getManual();
         const m = stored && stored.key === creditKey(cfg) ? stored : undefined;
         const v = m?.used ?? cfg.initialUsed;
         if (v == null) {
