@@ -15,13 +15,11 @@
   --on-pace: #0ca30c;
   --under: #2a78d6;
   --idle: #898781;
-  --zone-over: rgba(236, 131, 90, 0.11);
-  --zone-under: rgba(42, 120, 214, 0.09);
   --warn-bg: #fff4e5;
   --warn-ink: #7a3e00;
   --radius: 14px;
   --plot-h: 220px;
-  --axis-w: 64px;
+  --axis-w: 48px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,8 +34,6 @@
     --axis: #383835;
     --border: rgba(255, 255, 255, 0.1);
     --under: #3987e5;
-    --zone-over: rgba(236, 131, 90, 0.13);
-    --zone-under: rgba(57, 135, 229, 0.13);
     --warn-bg: #2d1f0e;
     --warn-ink: #fab219;
   }
@@ -53,8 +49,6 @@
   --axis: #383835;
   --border: rgba(255, 255, 255, 0.1);
   --under: #3987e5;
-  --zone-over: rgba(236, 131, 90, 0.13);
-  --zone-under: rgba(57, 135, 229, 0.13);
   --warn-bg: #2d1f0e;
   --warn-ink: #fab219;
 }
@@ -151,21 +145,17 @@ h1 {
   grid-template-rows: var(--plot-h) auto;
   position: relative;
 }
-.zones {
+.gridlines {
   grid-row: 1;
   grid-column: 2 / -1;
-  border-radius: 10px;
-  background: linear-gradient(to bottom, var(--zone-over) 0 50%, var(--zone-under) 50% 100%);
   position: relative;
 }
-.zones::after {
-  content: '';
+.gridlines i {
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(50% - 1px);
-  height: 2px;
-  background: var(--axis);
+  height: 1px;
+  background: var(--grid);
 }
 .axis {
   grid-row: 1;
@@ -177,19 +167,9 @@ h1 {
 }
 .axis span {
   position: absolute;
-  left: 0;
-  right: 8px;
-}
-.axis .a-top {
-  top: 6px;
-}
-.axis .a-mid {
-  top: 50%;
+  right: 10px;
   transform: translateY(-50%);
-  color: var(--ink-2);
-}
-.axis .a-bot {
-  bottom: 6px;
+  font-variant-numeric: tabular-nums;
 }
 .lane {
   grid-row: 1;
@@ -220,6 +200,35 @@ h1 {
 .hit {
   fill: transparent;
   cursor: pointer;
+}
+.expected,
+.legend-expected {
+  stroke: var(--ink);
+  stroke-linecap: round;
+}
+.legend-expected {
+  stroke-width: 3;
+}
+.gap {
+  stroke-linecap: round;
+  opacity: 0.45;
+}
+.gap.over {
+  stroke: var(--over);
+}
+.gap.limit {
+  stroke: var(--limit);
+}
+.gap.on_pace {
+  stroke: var(--on-pace);
+}
+.gap.under {
+  stroke: var(--under);
+}
+.gap.idle,
+.gap.ended,
+.gap.unknown {
+  stroke: var(--idle);
 }
 .dot.over {
   fill: var(--over);
@@ -558,8 +567,8 @@ form button,
 
 @media (max-width: 520px) {
   :root {
-    --plot-h: 190px;
-    --axis-w: 54px;
+    --plot-h: 200px;
+    --axis-w: 40px;
   }
   .card {
     padding: 14px 12px;

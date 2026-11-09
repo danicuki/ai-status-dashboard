@@ -4,13 +4,20 @@
 
 Claude, ChatGPT/Codex and Google Cloud each show raw percentages ("34% of your weekly limit used"), but a
 percentage alone doesn't tell you whether you're fine. 34% on Tuesday is a problem; 34% on Saturday is not.
-AI Pace compares how much you've **used** with how much of the period has **passed**, and shows a single dot:
+AI Pace compares how much you've **used** with how much of the period has **passed**: one column per tool,
+a dot for what you've used and a dash for what you should have used by now.
 
 ```
- too fast  ●                          ← using it faster than the period allows: slow down
- ───────────────── ●  ─────────────   ← on pace
- to spare                    ●        ← room to spare (for credits: they'll expire unused)
-          Claude   OpenAI   Gemini
+        Claude   OpenAI   Gemini
+100% ┬    │        │        │
+     │    │        │        │
+ 75% ┤    │      ━━┿━━    ━━┿━━     ━━ expected by now
+     │    │        │        │
+ 50% ┤    ●        │        │        ● used
+     │  ━━┿━━      │        ●
+ 25% ┤    │        ●        │        dot above the dash: too fast, slow down
+     │    │        │        │        dot below the dash: room to spare
+  0% ┴    │        │        │                (for credits: they'll expire unused)
 ```
 
 One small self-hosted server collects the data every 15 minutes and serves it to several front-ends:
@@ -34,7 +41,8 @@ Linear pace: when X% of the period has passed, you should have used at most X% o
   you're **below pace**: credits will expire unused, so you can use more.
 
 Every meter shows used %, expected %, the difference in points, a projection ("at this pace runs out in 2d 18h")
-and when it resets. Within ±5 points (`PACE_TOLERANCE`) counts as on pace.
+and when it resets. Within ±5 points (`PACE_TOLERANCE`) counts as on pace; nothing used once the period has
+started counts as below pace.
 
 | Symbol | Meaning | Color |
 |---|---|---|
@@ -45,8 +53,8 @@ and when it resets. Within ±5 points (`PACE_TOLERANCE`) counts as on pace.
 | ○ | nothing to track right now (e.g. no 5-hour session open) | gray |
 | ⚠ | action needed (e.g. credits expire in 15 days: time to request more) | yellow |
 
-Shape and position carry the meaning on their own; color only reinforces it. That's also why it works on the
-monochrome iPhone Lock Screen.
+Shape and position carry the meaning on their own (dot above or below the dash); color only reinforces it.
+That's also why it works on the monochrome iPhone Lock Screen.
 
 ## What it tracks
 
@@ -242,7 +250,8 @@ Every route requires `Authorization: Bearer <token>`.
 | `POST /api/v1/ingest` | `{"snapshots": [...]}`: data from push mode |
 | `GET /healthz` | no auth; for monitoring |
 
-`gauge` is the dot position: `tanh(delta / 25)`, so small deviations are visible and large ones never leave the scale.
+`used` and `expected` (0–100) are what the charts plot. `gauge` is the deviation squashed into −1…+1
+(`tanh(delta / 25)`), handy for a single LED or a needle.
 
 ## Configuration
 

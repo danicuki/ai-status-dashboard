@@ -13,8 +13,9 @@
  *      (rectangular, circular or inline) and pick this script.
  *      For the circular widget, the widget parameter picks the provider: claude, openai or gemini.
  *
- * Reading it: the middle line is the ideal pace. Dot above = using it too fast; below = room to
- * spare. Filled dot = week (or credits); ring = 5-hour session. ⚠ = action needed (e.g. credits
+ * Reading it: each column goes from 0% (bottom) to 100% (top). The dot is how much you've used, the
+ * dash is how much you should have used by now. Dot above the dash = using it too fast; below = room
+ * to spare. Filled dot = week (or credits); ring = 5-hour session. ⚠ = action needed (e.g. credits
  * about to expire).
  *
  * Security: the script makes a single request (GET <server>/api/v1/status, https only, never
@@ -50,6 +51,12 @@ const C = {
 function statusColor(status) {
   const v = HEX[status] || HEX.unknown;
   return Array.isArray(v) ? Color.dynamic(new Color(v[0]), new Color(v[1])) : new Color(v);
+}
+
+/** Single hex for a status (drawn images can't use dynamic colors, so "under" uses its mid step). */
+function statusHex(status) {
+  const v = HEX[status] || HEX.unknown;
+  return Array.isArray(v) ? v[1] : v;
 }
 
 function signed(v) {
@@ -106,9 +113,9 @@ async function askSettings(current) {
 }
 
 // ---------- data ----------
-/** Strings from the server: control, zero-width and bidi-override characters removed, length capped. */
+/** Strings from the server: control and format characters (zero-width, bidi, separators…) removed, length capped. */
 function text(v, max) {
-  return typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').slice(0, max) : '';
+  return typeof v === 'string' ? v.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '').slice(0, max) : '';
 }
 function numberIn(v, lo, hi) {
   return typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null;
@@ -183,7 +190,8 @@ function roundRect(dc, x, y, w, h, r, color) {
 }
 
 /**
- * The pace chart: one column per provider, ideal pace on the middle line.
+ * The pace chart: one column per provider on a shared 0–100% scale. The dot is how much you've used,
+ * the dash is how much you should have used by now, the line between them is how far off pace you are.
  * mono = Lock Screen (iOS tints it), so meaning comes from position and glyphs, never color.
  */
 function drawPace(providers, { width, height, mono = false, labels = 'glyph', fontSize = 11 }) {
@@ -193,54 +201,64 @@ function drawPace(providers, { width, height, mono = false, labels = 'glyph', fo
   dc.respectScreenScale = true;
 
   const white = (a) => new Color('#ffffff', a);
+  const gray = (a) => new Color('#898781', a);
   const labelH = labels ? fontSize + 5 : 0;
-  const top = 1;
-  const plotH = height - labelH - 2;
-  const mid = top + plotH / 2;
   const n = Math.max(1, providers.length);
   const colW = width / n;
-  const scale = Math.max(4, plotH / 2 - 8);
-  const yOf = (g) => mid - (g == null ? 0 : g) * scale;
-  const big = Math.max(4.5, Math.min(8, plotH / 13));
-  const small = Math.max(3, big * 0.6);
+  const big = Math.max(4, Math.min(7.5, (height - labelH) / 14));
+  const small = Math.max(2.5, big * 0.6);
+  const top = big + 1;
+  const bottom = height - labelH - big - 1;
+  const yOf = (v) => bottom - (Math.max(0, Math.min(100, v == null ? 0 : v)) / 100) * (bottom - top);
 
-  if (!mono) {
-    roundRect(dc, 0, top, width, plotH / 2, 6, new Color(HEX.over, 0.12));
-    roundRect(dc, 0, mid, width, plotH / 2, 6, new Color(HEX.under[1], 0.12));
+  // 0%, 50% and 100% guides.
+  for (const v of [0, 50, 100]) {
+    dc.setFillColor(mono ? white(v === 0 ? 0.5 : 0.22) : gray(v === 0 ? 0.5 : 0.22));
+    dc.fillRect(new Rect(0, yOf(v) - 0.5, width, 1));
   }
-  dc.setFillColor(mono ? white(0.65) : new Color('#898781', 0.9));
-  dc.fillRect(new Rect(0, mid - 0.75, width, 1.5));
 
   providers.forEach((p, i) => {
     const cx = colW * (i + 0.5);
     const xMain = cx - big - 1;
     const xSess = cx + big + 1;
-    const track = mono ? white(0.28) : new Color('#898781', 0.28);
-    roundRect(dc, xMain - 3, top + 2, 6, plotH - 4, 3, track);
-    roundRect(dc, xSess - 1, top + plotH * 0.1, 2, plotH * 0.8, 1, track);
+    const track = mono ? white(0.28) : gray(0.28);
+    roundRect(dc, xMain - 3, top, 6, bottom - top, 3, track);
+    roundRect(dc, xSess - 1, top, 2, bottom - top, 1, track);
 
-    const s = p.session;
-    if (s) {
-      const active = s.gauge != null;
-      dc.setStrokeColor(mono ? white(active ? 1 : 0.5) : statusColor(s.status));
-      dc.setLineWidth(2);
-      const y = yOf(s.gauge);
-      dc.strokeEllipse(new Rect(xSess - small, y - small, small * 2, small * 2));
-    }
-    const m = p.primary;
-    if (m) {
-      const active = m.gauge != null;
-      dc.setFillColor(mono ? white(active ? 1 : 0.5) : statusColor(m.status));
-      const y = yOf(m.gauge);
-      dc.fillEllipse(new Rect(xMain - big, y - big, big * 2, big * 2));
-    }
+    const marker = (m, x, r, filled) => {
+      const active = m.usedPct != null && m.status !== 'idle' && m.status !== 'unknown';
+      const color = mono ? white(active ? 1 : 0.5) : active ? statusColor(m.status) : gray(0.9);
+      const y = yOf(m.usedPct);
+      if (m.elapsedPct != null && m.usedPct != null) {
+        const ey = yOf(m.elapsedPct);
+        // gap line: expected → used
+        dc.setFillColor(mono ? white(0.45) : active ? new Color(statusHex(m.status), 0.45) : gray(0.45));
+        const lw = filled ? 3 : 2;
+        dc.fillRect(new Rect(x - lw / 2, Math.min(y, ey), lw, Math.abs(y - ey)));
+        // expected-by-now dash
+        const half = filled ? r + 4 : r + 2.5;
+        dc.setFillColor(mono ? white(1) : gray(1));
+        dc.fillRect(new Rect(x - half, ey - (filled ? 1.25 : 1), half * 2, filled ? 2.5 : 2));
+      }
+      if (filled) {
+        dc.setFillColor(color);
+        dc.fillEllipse(new Rect(x - r, y - r, r * 2, r * 2));
+      } else {
+        dc.setStrokeColor(color);
+        dc.setLineWidth(2);
+        dc.strokeEllipse(new Rect(x - r, y - r, r * 2, r * 2));
+      }
+    };
+    if (p.session) marker(p.session, xSess, small, false);
+    if (p.primary) marker(p.primary, xMain, big, true);
 
     if (labels) {
+      const m = p.primary;
       let label = `${p.short}${GLYPH[p.status]}`;
       if (labels === 'delta' && m && m.deltaPct != null) label += ` ${signed(m.deltaPct)}`;
       if (p.alerts.length) label += '⚠';
       dc.setFont(Font.semiboldSystemFont(fontSize));
-      dc.setTextColor(mono ? white(1) : p.alerts.length ? new Color(WARN) : new Color('#898781'));
+      dc.setTextColor(mono ? white(1) : p.alerts.length ? new Color(WARN) : gray(1));
       dc.setTextAlignedCenter();
       dc.drawTextInRect(label, new Rect(colW * i, height - labelH, colW, labelH));
     }

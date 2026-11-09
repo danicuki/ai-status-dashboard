@@ -163,13 +163,20 @@ function openFormat(name) {
   };
 }
 
-/** Diverging pace chart: one column per provider, ideal pace in the middle, above = too fast, below = room to spare. */
+/** Value (0–100 %) → vertical position inside a lane, as a CSS/SVG percentage (0 % at the bottom). */
+const yOf = (v) => `${96 - Math.max(0, Math.min(100, v ?? 0)) * 0.92}%`;
+const AXIS_TICKS = [100, 75, 50, 25, 0];
+
+/**
+ * Pace chart: one column per provider on a shared 0–100 % scale. The dot is how much you've used,
+ * the dash is how much you should have used by now; the line between them shows how far off pace you are.
+ */
 function renderPlot(providers) {
   const plot = $('#plot');
   plot.style.setProperty('--n', String(Math.max(1, providers.length)));
   const children = [
-    h('div', { class: 'axis', 'aria-hidden': 'true' }, h('span', { class: 'a-top' }, 'too fast'), h('span', { class: 'a-mid' }, 'on pace'), h('span', { class: 'a-bot' }, 'to spare')),
-    h('div', { class: 'zones', 'aria-hidden': 'true' }),
+    h('div', { class: 'axis', 'aria-hidden': 'true' }, AXIS_TICKS.map((v) => h('span', { style: `top:${yOf(v)}` }, `${v}%`))),
+    h('div', { class: 'gridlines', 'aria-hidden': 'true' }, AXIS_TICKS.map((v) => h('i', { style: `top:${yOf(v)}` }))),
   ];
   providers.forEach((p, i) => {
     const warn = p.alerts.length ? p.alerts.join('\n') : p.error ? p.error.message : p.stale ? 'stale data' : null;
@@ -196,19 +203,20 @@ function renderPlot(providers) {
 
 function laneSvg(p) {
   // Inner <svg x="50%"> puts the origin at the column's center; y is in % so no measuring is needed.
-  const yOf = (g) => `${50 - (g ?? 0) * 42}%`;
   const inner = s('svg', { x: '50%', y: '0', overflow: 'visible' });
   inner.append(
     s('rect', { class: 'track', x: -14, y: '4%', width: 8, height: '92%', rx: 4 }),
-    s('rect', { class: 'track-thin', x: 13, y: '10%', width: 3, height: '80%', rx: 1.5 }),
+    s('rect', { class: 'track-thin', x: 13, y: '4%', width: 3, height: '92%', rx: 1.5 }),
   );
-  if (p.session) inner.append(marker(p, p.session, 'session', 14.5, yOf(p.session.gauge)));
-  if (p.primary) inner.append(marker(p, p.primary, 'primary', -10, yOf(p.primary.gauge)));
+  if (p.session) inner.append(marker(p, p.session, 'session', 14.5));
+  if (p.primary) inner.append(marker(p, p.primary, 'primary', -10));
   else inner.append(s('text', { class: 'nodata', x: 0, y: '50%', 'text-anchor': 'middle', dy: '-14' }, 'no data'));
   return s('svg', { 'aria-hidden': 'true' }, inner);
 }
 
-function marker(p, m, kind, cx, cy) {
+function marker(p, m, kind, cx) {
+  const primary = kind === 'primary';
+  const cy = yOf(m.usedPct);
   const tip = meterTip(p, m, kind);
   const g = s('g', {
     tabindex: 0,
@@ -220,7 +228,14 @@ function marker(p, m, kind, cx, cy) {
     onclick: (e) => showTip(e, tip),
   });
   g.append(s('circle', { class: 'hit', cx, cy, r: 18 }));
-  if (kind === 'primary') g.append(s('circle', { class: `dot ${m.status}`, cx, cy, r: 10 }));
+  if (m.elapsedPct != null && m.usedPct != null) {
+    const ey = yOf(m.elapsedPct);
+    // Line from "expected now" to "used": its length is how far off pace you are.
+    g.append(s('line', { class: `gap ${m.status}`, x1: cx, x2: cx, y1: ey, y2: cy, 'stroke-width': primary ? 4 : 2.5 }));
+    const half = primary ? 13 : 8;
+    g.append(s('line', { class: 'expected', x1: cx - half, x2: cx + half, y1: ey, y2: ey, 'stroke-width': primary ? 3 : 2 }));
+  }
+  if (primary) g.append(s('circle', { class: `dot ${m.status}`, cx, cy, r: 10 }));
   else g.append(s('circle', { class: `ring ${m.status}`, cx, cy, r: 6 }));
   return g;
 }

@@ -99,8 +99,8 @@ test('iOS widget security: an invalid 200 response is not cached and falls back 
 
 test('iOS widget security: invisible and bidi characters from the server are stripped', async () => {
   const status = demoStatus();
-  (status.providers[0] as any).name = 'Cla\u202eude\u200b\u0007';
+  (status.providers[0] as any).name = 'Cla\u202eude\u200b\u0007\u2028\u00ad\u0085\u2063\u061c';
   const r = await runWidget({ family: 'medium', status });
   assert.ok(r.html.includes('>Claude<'), 'name rendered without hidden characters');
-  assert.ok(!/[\u202e\u200b\u0007]/.test(r.html));
+  assert.ok(!/[\u202e\u200b\u0007\u2028\u00ad\u0085\u2063\u061c]/.test(r.html));
 });
